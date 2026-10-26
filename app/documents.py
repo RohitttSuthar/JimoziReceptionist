@@ -64,7 +64,13 @@ _STOP_WORDS = {
     "about","and","or","to","for","of","in","on","hai","ka","ki","ke","kya","ek","mujhe","bataye","batao",
     "बताओ","क्या","कैसे","कहाँ","है","हैं","का","की","के","मुझे","और","में","आता","आती","आते","कौन","सा","सी","से",
     "कितने","कितना","क्या","मिलता","मिलती","होता","होती","होगा","होगी","हैं",
+    "hello","hi","hey","namaste","namaskar","aap","ap","ho","hain","hota","hoti","hote","dete","deti","karte","karta",
+    "kar","kare","karna","me","mein","ko","kaise","kitne","kitna","kitni","mera","meri","mere","yeh","ye","wo","woh",
+    "nahi","nahin","se","par","pe","bhi","toh","to","you","your","i","my","we","it","this","that","there","with","be",
+    "हेलो","हैलो","हाय","नमस्ते","आप","हो","करते","करता","करती","कर","को","कैसे","मेरा","मेरी","यह","ये","वो","भी","तो","पर",
 }
+# Transliteration variants that character-level fuzzy matching cannot bridge safely.
+_ALIASES = {"vej": "veg", "klasik": "classic", "tifin": "tiffin", "tiphin": "tiffin", "bks": "box", "lnch": "lunch"}
 
 def _latinize_token(token: str) -> str:
     out = []
@@ -84,29 +90,57 @@ def _search_tokens(text: str) -> list[str]:
         if token not in _STOP_WORDS and len(token) > 1
     ]
 
+def _fuzzy_equal(a: str, b: str) -> bool:
+    """Strict fuzzy match: both >=4 chars, similar length, high similarity."""
+    if len(a) < 4 or len(b) < 4 or abs(len(a) - len(b)) > 2:
+        return False
+    return difflib.SequenceMatcher(None, a, b).ratio() >= 0.84
+
+def _content_forms(content_tokens: list[str]) -> set[str]:
+    forms = set(content_tokens)
+    forms.update(_latinize_token(t) for t in content_tokens)
+    return forms
+
+def _token_match(token: str, content_forms: set[str]) -> float:
+    """Return 1.0 for exact/transliterated/alias match, 0.7 for strict fuzzy, else 0."""
+    latin = _latinize_token(token)
+    forms = {token, latin, _ALIASES.get(token, token), _ALIASES.get(latin, latin)}
+    if any(f and f in content_forms for f in forms):
+        return 1.0
+    for f in forms:
+        if len(f) >= 4 and any(_fuzzy_equal(f, c) for c in content_forms):
+            return 0.7
+    return 0.0
+
 def _cross_language_overlap(query_tokens: list[str], content_tokens: list[str]) -> float:
-    """Fraction of query terms matched exactly or by Hindi-to-Latin transliteration."""
+    """Fraction of query terms matched exactly, by Hindi-to-Latin transliteration, or strict fuzzy match."""
     if not query_tokens:
         return 0.0
-    content_forms = set(content_tokens)
-    content_forms.update(_latinize_token(t) for t in content_tokens)
-    hits = 0
-    for token in query_tokens:
-        forms = {token, _latinize_token(token)}
-        matched = any(form and form in content_forms for form in forms)
-        if not matched:
-            # Small-token fuzzy matching is deliberately strict; it is mainly for
-            # common transliteration differences such as "vej"/"veg" or "tifin"/"tiffin".
-            candidates = [form for form in forms if len(form) >= 3]
-            for form in candidates:
-                for candidate in content_forms:
-                    if len(candidate) >= 3 and difflib.SequenceMatcher(None, form, candidate).ratio() >= 0.65:
-                        matched = True
-                        break
-                if matched:
-                    break
-        hits += int(matched)
-    return hits / len(query_tokens)
+    forms = _content_forms(content_tokens)
+    return sum(_token_match(t, forms) for t in query_tokens) / len(query_tokens)
+
+_GREETING = re.compile(r"^(?:hello|hi|hey|hii+|namaste|namaskar|good\s+(?:morning|afternoon|evening)|हेलो|हैलो|हाय|नमस्ते|नमस्कार)[\s!.,]*$", re.I)
+_THANKS = re.compile(r"^(?:thanks?(?:\s+you)?|thank\s+you|shukriya|dhanyavaad?|धन्यवाद|शुक्रिया)[\s!.,]*$", re.I)
+
+def _best_snippet(content: str, qtokens: list[str], limit: int = 500) -> str:
+    """Pick the Q/A pair (or sentences) of the chunk that best matches the question."""
+    text = re.sub(r"\s+", " ", content).strip()
+    segments = [x.strip() for x in re.split(r"(?=\bQ:\s)", text) if x.strip()]
+    if len(segments) <= 1:
+        segments = [x.strip() for x in re.split(r"(?<=[.!?।])\s+", text) if x.strip()]
+    best, best_score = text, -1.0
+    for seg in segments:
+        forms = _content_forms(_search_tokens(seg))
+        # Longer words are more specific ("delivery" outweighs "time").
+        score = sum(_token_match(t, forms) * len(t) for t in qtokens)
+        if score > best_score:
+            best, best_score = seg, score
+    m = re.search(r"\bA:\s*(.*)", best)
+    if m:
+        best = m.group(1)
+    best = re.sub(r"JIMOZI FAQ\s*$", "", best).strip()
+    return best[:limit]
+
 
 def chunk_text(text: str, chunk_chars: int = 1100, overlap: int = 180) -> list[str]:
     text = re.sub(r"[\t\r]+", " ", text)
@@ -307,33 +341,47 @@ class DocumentKnowledgeBase:
         qtokens = _search_tokens(query)
         if not qtokens and qvec is None:
             return []
+        import math
+        row_forms = [_content_forms(_search_tokens(r["content"])) for r in rows]
+        n_rows = len(rows)
+        idf = {}
+        for t in qtokens:
+            df = sum(1 for f in row_forms if _token_match(t, f) >= 1.0)
+            idf[t] = math.log(1 + n_rows / (1 + df))
+        total_idf = sum(idf.values()) or 1.0
         ranked = []
-        for row in rows:
-            content = row["content"]
-            ctokens = _search_tokens(content)
-            exact_overlap = len(set(qtokens) & set(ctokens)) / max(1, len(qtokens))
-            cross_overlap = _cross_language_overlap(qtokens, ctokens)
-            score = max(exact_overlap, cross_overlap * 0.9)
+        for row, forms in zip(rows, row_forms):
+            lexical = sum(idf[t] * _token_match(t, forms) for t in qtokens) / total_idf if qtokens else 0.0
+            score = lexical
             if qvec is not None and row["embedding"]:
                 vec = np.frombuffer(row["embedding"], dtype=np.float32)
                 denom = float(np.linalg.norm(qvec) * np.linalg.norm(vec))
                 if denom:
                     cosine = float(np.dot(qvec, vec) / denom)
-                    score = max(score, 0.78 * cosine + 0.12 * exact_overlap + 0.10 * cross_overlap)
-            # If multiple words in the question match a chunk after transliteration,
-            # preserve that evidence even when cross-language cosine scores are low.
-            if cross_overlap >= 0.34:
-                score = max(score, 0.22 + 0.18 * cross_overlap)
+                    score = max(score, 0.78 * cosine + 0.22 * lexical)
             if score > 0.02:
                 ranked.append((score, row))
         ranked.sort(key=lambda x: x[0], reverse=True)
-        result = []
-        for score, row in ranked[:limit]:
+        result, seen = [], set()
+        for score, row in ranked:
+            key = re.sub(r"\W+", "", row["content"].lower())[:200]
+            if key in seen:  # identical text uploaded in several PDFs
+                continue
+            seen.add(key)
             result.append({"score": round(float(score), 4), "source": row["filename"], "page": row["page"],
                            "content": row["content"], "document_id": row["document_id"]})
+            if len(result) >= limit:
+                break
         return result
 
     async def answer(self, product_id: str, question: str, audience: str, business: dict[str, Any], history: list[dict[str, str]]) -> dict[str, Any]:
+        q = question.strip()
+        if _GREETING.match(q):
+            return {"answer": business.get("greeting") or "नमस्ते! बताइए, मैं आपकी क्या मदद कर सकती हूँ?", "matched": True,
+                    "answer_mode": "smalltalk_greeting", "sources": [], "match_score": 1.0}
+        if _THANKS.match(q):
+            return {"answer": "आपका स्वागत है! और कुछ जानना हो तो बताइए।", "matched": True,
+                    "answer_mode": "smalltalk_thanks", "sources": [], "match_score": 1.0}
         sources = await self.search(product_id, question, audience)
         fallback = ("माफ़ कीजिए, uploaded documents में इस सवाल की पुष्टि करने वाली जानकारी नहीं मिली। "
                     "कृपया टीम से पुष्टि करें।")
@@ -347,7 +395,7 @@ class DocumentKnowledgeBase:
         client = self._openai() if settings.enable_llm_answers else None
         if not client:
             best = sources[0]
-            return {"answer": f"यह संबंधित जानकारी मिली: {strip_citations(best['content'][:500])}",
+            return {"answer": f"यह संबंधित जानकारी मिली: {strip_citations(_best_snippet(best['content'], _search_tokens(question)))}",
                     "matched": True, "answer_mode": "document_extract_no_llm",
                     "sources": [{"filename": s["source"], "page": s["page"], "score": s["score"]} for s in sources[:3]], "match_score": best["score"]}
         context = "\n\n".join(f"EXCERPT {i}:\n{s['content']}" for i, s in enumerate(sources, 1))
