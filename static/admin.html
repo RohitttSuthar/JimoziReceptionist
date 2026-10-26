@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>JIMOZI Knowledge Manager</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@100;200;300;400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/admin.css">
+</head>
+<body>
+
+<header>
+  <h1>Knowledge Manager</h1>
+  <div class="brand">JIMOZI Customer Support</div>
+  <p class="lead">Upload business documents. The text is extracted and indexed automatically, so no FAQ JSON is needed.</p>
+</header>
+
+<section class="panel">
+  <h2>Upload a document</h2>
+  <form id="uploadForm">
+    <div class="grid">
+      <div class="field">
+        <label for="product">Product ID</label>
+        <input id="product" value="jimozi" required pattern="[A-Za-z0-9_-]+">
+      </div>
+      <div class="field">
+        <label for="audience">Knowledge audience</label>
+        <select id="audience">
+          <option value="both">Both Chef and Consumer</option>
+          <option value="consumer">Consumer only</option>
+          <option value="chef">Chef only</option>
+        </select>
+      </div>
+    </div>
+    <div class="field">
+      <label for="file">Document (PDF, DOCX, TXT, MD or CSV, max 25 MB)</label>
+      <input id="file" type="file" accept=".pdf,.docx,.txt,.md,.csv" required>
+    </div>
+    <button class="primary" id="uploadButton" type="submit">Upload and index document</button>
+    <div id="uploadStatus" class="status" role="status" aria-live="polite"></div>
+  </form>
+</section>
+
+<section class="panel">
+  <div class="head">
+    <div>
+      <h2>Indexed documents</h2>
+      <div class="muted small" class="mt6">Remove outdated documents to remove their knowledge from search.</div>
+    </div>
+    <button type="button" class="ghost" id="refreshButton">Refresh list</button>
+  </div>
+  <div id="documents" class="status muted" aria-live="polite">Loading…</div>
+</section>
+
+<script src="/static/admin.js" defer></script>
+</body>
+</html>

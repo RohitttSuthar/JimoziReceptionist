@@ -1,0 +1,14 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+data/knowledge.sqlite3
+data/knowledge.sqlite3-shm
+data/knowledge.sqlite3-wal
+data/documents/
+*.log
+.DS_Store
