@@ -6,6 +6,7 @@ import re
 import time
 import uuid
 import secrets
+import os
 from collections import defaultdict, deque
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
@@ -18,12 +19,15 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from .config import ProductStore, ROOT, settings
-from .documents import knowledge_base
+from .documents import knowledge_base, _hindi_ratio
 from .services import TTSService
 from .sessions import SessionStore
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("voice_receptionist")
+# Print every question and answer in the console. Set CONSOLE_PRINT_CHAT=false in .env to turn this off
+# (conversations can contain personal data, so disable it in production).
+PRINT_CHAT = os.getenv("CONSOLE_PRINT_CHAT", "true").lower() == "true"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     warmup_task = None
@@ -225,19 +229,25 @@ async def chat(req: ChatRequest, request: Request):
     history_key = f"{mode}:{session_id}"
     history = await sessions.get(history_key)
     answer_started = time.perf_counter()
-    result = await knowledge_base.answer(product_id, text, mode, business, history)
+    result = await knowledge_base.answer(product_id, text, mode, business, history, policies=policies)
     answer_ms = round((time.perf_counter() - answer_started) * 1000, 1)
     answer = result["answer"]
     await sessions.append(history_key, text, answer)
+    if PRINT_CHAT:
+        src = ", ".join(f"{x.get('filename') or x.get('source')}" + (f" p{x['page']}" if x.get("page") else "") for x in result.get("sources", [])[:3]) or "-"
+        print(f"\n{'=' * 70}\n[{mode.upper()}] QUESTION : {text}\n[{mode.upper()}] ANSWER   : {answer}\n"
+              f"  intent={result.get('intent')}  understood_as={result.get('rewritten_query')}\n  mode={result.get('answer_mode')}  score={result.get('match_score')}  time={answer_ms}ms  sources={src}\n{'=' * 70}", flush=True)
     response: dict[str, Any] = {
         "session_id": session_id, "product_id": product_id, "mode": mode,
         "product_name": business.get("name", product_id), "transcript": text,
         **result, "knowledge_version": snap["version"],
         "latency_ms": {"answer_generation": answer_ms, "total_before_tts": round((time.perf_counter() - started) * 1000, 1)}
     }
+    # The voice must match the script of the answer actually produced (English or Hindi).
+    response["answer_language"] = "hi" if _hindi_ratio(answer) >= 0.3 else "en"
     if req.include_audio:
         audio_started = time.perf_counter()
-        audio = await tts.synthesize(answer)
+        audio = await tts.synthesize(answer, lang=response["answer_language"])
         response["audio"] = audio
         response["latency_ms"]["tts"] = round((time.perf_counter() - audio_started) * 1000, 1)
     response["latency_ms"]["total_server"] = round((time.perf_counter() - started) * 1000, 1)
@@ -294,6 +304,7 @@ async def public_config():
             "supertonic_language": settings.supertonic_language,
             "greeting": business.get("greeting", "नमस्ते! मैं आपकी ग्राहक सहायता रिसेप्शनिस्ट हूँ। बताइए, मैं आपकी क्या मदद कर सकती हूँ?"),
             "llm_enabled": settings.enable_llm_answers and bool(settings.openai_api_key),
+            "full_context": settings.enable_full_context and settings.enable_llm_answers and bool(settings.openai_api_key),
             "supported_modes": ["consumer", "chef"],
             "strict_faq_only": False,
             "knowledge_mode": "uploaded_documents",

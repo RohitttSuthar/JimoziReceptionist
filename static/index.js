@@ -9,6 +9,7 @@ let recognition = null, listening = false, busy = false, callActive = false, cal
 let sessionId = null, currentAudio = null, finalText = '';
 let state = 'connecting', audioCtx = null, micStream = null, micAn = null, ttsAn = null;
 let timerId = null, startedAt = 0;
+let speechRestartTimer = null, speechLastError = '';
 
 const LABELS = { connecting: 'Connecting…', listening: 'Listening', thinking: 'One moment', speaking: 'Speaking', error: 'Something went wrong' };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -32,28 +33,42 @@ fetch('/api/config').then(r => r.json()).then(c => {
 }).catch(() => {});
 
 /* ---------- Call lifecycle ---------- */
+const IS_MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
 async function startCall(){
   if (callActive) return;
-  callActive = true; callToken++; busy = false; finalText = '';
+  callActive = true; callToken++; busy = false; finalText = ''; speechLastError = '';
+  clearTimeout(speechRestartTimer); speechRestartTimer = null;
   $('homeNote').textContent = ''; $('timer').textContent = '0:00';
   openOverlay(); setState('connecting');
   try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); audioCtx.resume && audioCtx.resume(); } catch(e){ audioCtx = null; }
   try {
-    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
     if (!callActive) { stopMic(); return; }
-    if (audioCtx) { micAn = audioCtx.createAnalyser(); micAn.fftSize = 512; audioCtx.createMediaStreamSource(micStream).connect(micAn); }
+    if (IS_MOBILE) {
+      // On Android/iOS an open getUserMedia stream can keep SpeechRecognition from receiving audio
+      // (it stays on "Listening" forever). We only needed the permission prompt, so release the mic.
+      // The orb falls back to its built-in idle animation on mobile.
+      stopMic();
+    } else if (audioCtx) {
+      micAn = audioCtx.createAnalyser(); micAn.fftSize = 512;
+      audioCtx.createMediaStreamSource(micStream).connect(micAn);
+    }
   } catch(e){
+    console.error('[JIMOZI] microphone error:', e);
     if (e && e.name === 'NotFoundError') { endCall('No microphone found.'); return; }
     if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) { endCall('Microphone access is needed to talk to support.'); return; }
+    endCall('Could not access the microphone: ' + ((e && e.message) || 'unknown error')); return;
   }
   if (!callActive) return;
   startRecognition();
 }
 
-function stopMic(){ if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; } }
+function stopMic(){ if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; } micAn = null; }
 
 function endCall(note){
   callActive = false; callToken++; busy = false;
+  clearTimeout(speechRestartTimer); speechRestartTimer = null;
   try { if (recognition && listening) recognition.abort(); } catch(e){}
   if (currentAudio) { currentAudio.pause(); currentAudio = null; }
   if ('speechSynthesis' in window) window.speechSynthesis.cancel();
@@ -66,40 +81,67 @@ function endCall(note){
 }
 
 /* ---------- Speech recognition ---------- */
+function scheduleRestart(delay){
+  clearTimeout(speechRestartTimer);
+  speechRestartTimer = setTimeout(() => {
+    speechRestartTimer = null;
+    if (callActive && !listening && !busy) startRecognition();
+  }, delay);
+}
+
 function startRecognition(){
   if (!recognition || !callActive || listening || busy) return;
-  try { recognition.lang = cfg.speechLang; recognition.start(); }
-  catch(e){ setTimeout(() => { if (callActive && !listening && !busy) startRecognition(); }, 500); }
+  try {
+    recognition.lang = cfg.speechLang || 'hi-IN';
+    recognition.start();
+  } catch(e){
+    // start() throws if the engine is still shutting down; retry shortly.
+    console.warn('[JIMOZI] recognition.start() failed:', e);
+    scheduleRestart(800);
+  }
 }
 
 function setupRecognition(){
-  if (!SR) { $('callBtn').disabled = true; $('homeNote').textContent = 'Voice calls work in Chrome or Edge.'; return; }
+  if (!SR) { $('callBtn').disabled = true; $('homeNote').textContent = 'Speech recognition is not supported in this browser. Use Chrome or Edge.'; return; }
   recognition = new SR();
   recognition.continuous = false;
   recognition.interimResults = true;
+  recognition.maxAlternatives = 1;
 
   recognition.onstart = () => {
-    listening = true; finalText = '';
+    listening = true; finalText = ''; speechLastError = '';
     if (!callActive) return;
     setState('listening');
     if (!timerId) { startedAt = Date.now(); timerId = setInterval(tick, 1000); tick(); }
   };
+
   recognition.onresult = e => {
+    let interim = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
-      const t = e.results[i][0].transcript;
-      if (e.results[i].isFinal) finalText += t;
+      const t = e.results[i][0] ? e.results[i][0].transcript : '';
+      if (e.results[i].isFinal) finalText += t + ' '; else interim += t;
     }
+    // Show what the browser is hearing so it is obvious whether recognition works.
+    const shown = (finalText + interim).trim();
+    if (callActive && shown) $('status').textContent = shown;
   };
+
   recognition.onerror = e => {
-    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') endCall('Microphone access is needed to talk to support.');
-    else if (e.error === 'network') endCall('Speech service is unavailable. Check your connection and try again.');
+    speechLastError = e.error || 'unknown';
+    console.warn('[JIMOZI] speech recognition error:', speechLastError, e.message || '');
+    if (speechLastError === 'not-allowed' || speechLastError === 'service-not-allowed') endCall('Microphone permission denied. Allow microphone access and try again.');
+    else if (speechLastError === 'network') endCall('Browser speech service unavailable. Check your internet connection.');
+    else if (speechLastError === 'audio-capture') endCall('Could not access the microphone. Check your device settings.');
+    else if (speechLastError === 'language-not-supported') endCall('This browser does not support the configured speech language.');
     /* "no-speech" and "aborted" are normal: onend restarts listening */
   };
+
   recognition.onend = async () => {
     listening = false;
     const text = finalText.trim(); finalText = '';
-    if (text && callActive) await handle(text);
-    if (callActive) startRecognition();
+    if (!callActive) return;
+    if (text) await handle(text);
+    if (callActive && !busy) scheduleRestart(text ? 300 : 400);
   };
 }
 
@@ -117,7 +159,7 @@ async function handle(text){
     if (token !== callToken) return;
     sessionId = d.session_id;
     setState('speaking');
-    await speak(d.answer, token);
+    await speak(d.answer, token, d.answer_language);
   } catch(e){
     if (token !== callToken) return;
     setState('error');
@@ -127,7 +169,7 @@ async function handle(text){
   }
 }
 
-async function speakBrowserFast(text, token){
+async function speakBrowserFast(text, token, langOverride){
   if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) return false;
   let voices = window.speechSynthesis.getVoices();
   if (!voices.length) {
@@ -139,32 +181,49 @@ async function speakBrowserFast(text, token){
     });
     voices = window.speechSynthesis.getVoices();
   }
-  const lang = (cfg.ttsLang || 'hi').toLowerCase().startsWith('hi') ? 'hi' : (cfg.ttsLang || 'hi').toLowerCase();
+  const wantLang = (langOverride || cfg.ttsLang || 'hi').toLowerCase();   // follows the language of the answer (en / hi)
+  const lang = wantLang.startsWith('hi') ? 'hi' : wantLang;
   const voice = voices.find(v => (v.lang || '').toLowerCase().startsWith(lang));
   if (!voice || token !== callToken) return false;
   return await new Promise(resolve => {
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.voice = voice;
-    utterance.lang = voice.lang || 'hi-IN';
+    utterance.lang = voice.lang || (lang === 'hi' ? 'hi-IN' : 'en-IN');
     utterance.rate = 1.04;
     utterance.pitch = 1;
-    utterance.onend = () => resolve(true);
-    utterance.onerror = () => resolve(false);
+    const t0 = performance.now();
+    let started = false, finished = false, startTimer = null, stallTimer = null;
+    const finish = ok => {
+      if (finished) return;
+      finished = true; clearTimeout(startTimer); clearTimeout(stallTimer);
+      resolve(ok);
+    };
+    // If the browser never starts speaking, hand over to the server (Supertonic) voice instead of staying silent.
+    startTimer = setTimeout(() => { if (!started) { try { window.speechSynthesis.cancel(); } catch(e){} finish(false); } }, 1500);
+    // Safety net: some browsers never fire "end" on long text.
+    stallTimer = setTimeout(() => { try { window.speechSynthesis.cancel(); } catch(e){} finish(true); }, Math.max(8000, text.length * 160));
+    utterance.onstart = () => { started = true; };
+    utterance.onend = () => {
+      // An "end" that arrives almost instantly means nothing was actually spoken (silent-voice bug): fall back.
+      const spoken = performance.now() - t0;
+      finish(started && spoken > Math.min(700, text.length * 15));
+    };
+    utterance.onerror = () => finish(false);
     window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(utterance);
+    setTimeout(() => window.speechSynthesis.speak(utterance), 60);  // avoids the cancel()+speak() race that drops the utterance
   });
 }
 
-async function speak(text, token){
+async function speak(text, token, langOverride){
   if (!text) return;
   // Browser-native Hindi speech starts sooner than a second HTTP request plus local TTS
   // synthesis. If a Hindi voice is unavailable, preserve the original Supertonic path.
-  if (cfg.browserTtsFastPath && await speakBrowserFast(text, token)) return;
+  if (cfg.browserTtsFastPath && await speakBrowserFast(text, token, langOverride)) return;
   try {
     if (currentAudio) { currentAudio.pause(); currentAudio = null; }
     const r = await fetch('/api/speak', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, lang: cfg.ttsLang, voice: cfg.ttsVoice })
+      body: JSON.stringify({ text, lang: langOverride || cfg.ttsLang, voice: cfg.ttsVoice })
     });
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || 'TTS failed');

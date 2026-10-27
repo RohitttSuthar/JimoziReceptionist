@@ -34,8 +34,13 @@ class Settings:
     admin_rate_limit_per_minute = int(os.getenv("ADMIN_RATE_LIMIT_PER_MINUTE", "20"))
     log_transcripts = os.getenv("LOG_TRANSCRIPTS", "false").lower() == "true"
     openai_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    openai_base_url = os.getenv("OPENAI_BASE_URL", "").strip() or None  # any OpenAI-compatible provider (Groq, Ollama, ...)
+    openai_embedding_model = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small").strip()
     enable_grounded_llm_rewrite = os.getenv("ENABLE_GROUNDED_LLM_REWRITE", "false").lower() == "true"  # legacy setting
     enable_llm_answers = os.getenv("ENABLE_LLM_ANSWERS", "true").lower() == "true"
+    enable_query_understanding = os.getenv("ENABLE_QUERY_UNDERSTANDING", "true").lower() == "true"  # LLM works out the user's intent
+    openai_understanding_model = os.getenv("OPENAI_UNDERSTANDING_MODEL", "").strip() or openai_model
+    enable_llm_generation = os.getenv("ENABLE_LLM_GENERATION", "true").lower() == "true"  # GPT writes the final customer-facing answer by default
     openai_timeout_seconds = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "5.0"))
     openai_max_tokens = int(os.getenv("OPENAI_MAX_TOKENS", "180"))
     llm_max_faqs_context = int(os.getenv("LLM_MAX_FAQS_CONTEXT", "60"))
@@ -47,6 +52,14 @@ class Settings:
     semantic_top_k = int(os.getenv("SEMANTIC_TOP_K", "24"))
     semantic_min_score = float(os.getenv("SEMANTIC_MIN_SCORE", "0.30"))
     max_answer_chars = int(os.getenv("MAX_ANSWER_CHARS", "650"))
+
+    # --- Full-context mode: GPT reads ALL uploaded documents on every question, works out the intent,
+    # and answers in English or Hindi. Falls back to the older retrieval pipeline if anything fails.
+    enable_full_context = os.getenv("ENABLE_FULL_CONTEXT", "true").lower() == "true"
+    openai_full_context_model = os.getenv("OPENAI_FULL_CONTEXT_MODEL", "").strip() or openai_model
+    full_context_max_tokens = int(os.getenv("FULL_CONTEXT_MAX_TOKENS", "90000"))   # estimated corpus budget; above it -> retrieval pipeline
+    full_context_timeout_seconds = float(os.getenv("FULL_CONTEXT_TIMEOUT_SECONDS", "15"))
+    full_context_max_output_tokens = int(os.getenv("FULL_CONTEXT_MAX_OUTPUT_TOKENS", "450"))  # Hindi needs far more tokens than English
     redis_url = os.getenv("REDIS_URL", "")
     session_ttl_seconds = int(os.getenv("SESSION_TTL_SECONDS", "7200"))
     max_local_sessions = int(os.getenv("MAX_LOCAL_SESSIONS", "1000"))
