@@ -1,0 +1,21 @@
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.30,<1.0
+pydantic>=2.8,<3.0
+numpy>=1.26
+soundfile>=0.12
+supertonic
+openai>=1.40,<3.0
+pytest>=8.0
+httpx>=0.27
+redis>=5.0,<7.0
+pypdf>=5.0,<7.0
+python-docx>=1.1,<2.0
+python-multipart>=0.0.9,<1.0
+# Optional scanned-PDF OCR support (also install the Tesseract system binary + eng/hin packs):
+# pymupdf>=1.24,<2.0
+# pytesseract>=0.3.10,<1.0
+# Pillow>=10.0,<13.0
+
+# Local Shruti STT for Hindi, English and Hinglish (downloads the model on first startup)
+cactus-needle
+huggingface_hub>=0.24

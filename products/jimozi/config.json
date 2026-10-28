@@ -1,0 +1,49 @@
+{
+  "business": {
+    "name": "JIMOZI",
+    "type": "tiffin_ordering",
+    "language": [
+      "hi",
+      "hi-IN"
+    ],
+    "persona": "विनम्र, संक्षिप्त और मददगार हिंदी ग्राहक सहायता रिसेप्शनिस्ट",
+    "greeting": "नमस्ते! मैं जिमोज़ी की ग्राहक सहायता रिसेप्शनिस्ट हूँ। बताइए, मैं आपकी क्या मदद कर सकती हूँ?"
+  },
+  "policies": {
+    "answer_only_from_faq": true,
+    "max_response_sentences": 3,
+    "fallback": "माफ़ कीजिए, इस सवाल की पक्की जानकारी मेरे पास नहीं है। मैं आपको हमारी सहायता टीम से जोड़ने में मदद कर सकता हूँ।",
+    "support_handoff": {
+      "enabled": false,
+      "mode": "not_configured",
+      "acceptance_phrases": [
+        "अच्छा तो जोड़ दो फिर",
+        "हाँ जोड़ दो",
+        "मुझे जोड़ दो",
+        "जोड़ दीजिए",
+        "कनेक्ट कर दो",
+        "हाँ मुझे सपोर्ट से जोड़ दो",
+        "haan connect kar do",
+        "achha to jod do phir",
+        "connect me",
+        "please connect me",
+        "connect me to support",
+        "yes connect me"
+      ],
+      "previous_offer_markers": [
+        "सहायता टीम से जोड़",
+        "सपोर्ट टीम से जोड़",
+        "सहायता टीम",
+        "customer support",
+        "support team"
+      ],
+      "unavailable_message": "ज़रूर, मैं आपको सहायता टीम से जोड़ने में मदद करना चाहती हूँ। लेकिन इस डेमो में लाइव एजेंट कनेक्शन अभी सेट नहीं है। कृपया जिमोज़ी ऐप के आधिकारिक सहायता विकल्प से संपर्क करें।",
+      "configured_message": "ठीक है, मैं आपको सहायता टीम से जोड़ने की प्रक्रिया शुरू कर रही हूँ।",
+      "contact_url": "",
+      "contact_phone": ""
+    },
+    "mode_fallbacks": {
+      "chef": "माफ़ कीजिए, Chef से जुड़ी इस जानकारी की पुष्टि अभी उपलब्ध नहीं है। कृपया अपनी टीम से पुष्टि करें।"
+    }
+  }
+}
