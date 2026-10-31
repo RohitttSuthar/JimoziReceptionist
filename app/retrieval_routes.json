@@ -1,0 +1,74 @@
+[
+  {
+    "pattern": "\\b(register|registration|signup|sign\\s*up|login|log\\s*in|sign\\s*in)\\b|रजिस्टर|रजिस्ट्रेशन|लॉगिन|लॉग\\s*इन|साइन\\s*अप|अकाउंट",
+    "queries": [
+      "customer account signup login mobile OTP",
+      "साइन अप लॉगिन मोबाइल ओटीपी"
+    ],
+    "language": "hi",
+    "intent": "account_login"
+  },
+  {
+    "pattern": "(?=.*(?:\\botp\\b|ओटीपी))(?=.*(?:nhi|nahin|nahi|not|receive|received|aaya|aayi|arha|aa\\s*raha|नहीं|नही|नहीं\\s*आया|नहीं\\s*आ\\s*रहा|नहीं\\s*मिला|नहीं\\s*मिल))",
+    "queries": [
+      "OTP not received mobile network resend countdown incorrect OTP",
+      "ओटीपी नहीं आया मोबाइल नेटवर्क नंबर दोबारा भेजें"
+    ],
+    "language": "hi",
+    "intent": "otp_not_received"
+  },
+  {
+    "pattern": "\\b(offer|offers|discount|coupon|promo|promotion)\\b|ऑफर|छूट|डिस्काउंट|कूपन",
+    "queries": [
+      "active offers discounts coupons promotional deals meal plans",
+      "ऑफर छूट डिस्काउंट कूपन मील प्लान"
+    ],
+    "language": "hi",
+    "intent": "offers_discounts"
+  },
+  {
+    "pattern": "\\b(subscribe|subscription|charge|charged|fee|fees|price|cost|payment|paid)\\b|सब्सक्राइब|सब्सक्रिप्शन|चार्ज|शुल्क|फीस|कीमत|दाम|भुगतान",
+    "queries": [
+      "subscription charges fees payment pricing tiffin meal plan price",
+      "सब्सक्रिप्शन चार्ज फीस भुगतान टिफिन मील प्लान कीमत"
+    ],
+    "language": "hi",
+    "intent": "subscription_charges"
+  },
+  {
+    "pattern": "\\b(app|application)\\b.{0,45}\\b(bare|baare|about|batao|jankari|jaankari|tell|what|kya)\\b|ऐप.{0,35}(बारे|बत|जानकारी)",
+    "queries": [
+      "Jimozi food marketplace customer lunch dinner meal plans",
+      "जिमोज़ी फूड मार्केटप्लेस ग्राहक लंच डिनर प्लान"
+    ],
+    "language": "hi",
+    "intent": "product_overview"
+  },
+  {
+    "pattern": "के\\s*बारे\\s*में|बार\\s*में\\s*बत|tell\\s+me\\s+about|about\\s+jimozi|किस\\s+काम\\s+आता|क्या\\s+काम\\s+करता|kya\\s+karta|what\\s+is\\s+jimozi",
+    "queries": [
+      "Jimozi food marketplace customer lunch dinner meal plans",
+      "जिमोज़ी फूड मार्केटप्लेस ग्राहक लंच डिनर प्लान"
+    ],
+    "language": "hi",
+    "intent": "product_overview"
+  },
+  {
+    "pattern": "\\b(rating|rate|review)\\b|रेटिंग|रिव्यू",
+    "queries": [
+      "rate kitchen review after delivered order stars comment",
+      "किचन को रेटिंग दें डिलीवर ऑर्डर स्टार कमेंट"
+    ],
+    "language": "hi",
+    "intent": "kitchen_rating"
+  },
+  {
+    "pattern": "\\b(tiffin|tifin|meal\\s*plan)\\b.{0,45}\\b(bare|baare|about|batao|jankari|jaankari|what|kya)\\b|टिफिन.{0,35}(बारे|बत|जानकारी)",
+    "queries": [
+      "tiffin meal plan lunch dinner fixed days",
+      "टिफिन प्लान लंच डिनर तय दिन"
+    ],
+    "language": "hi",
+    "intent": "tiffin_overview"
+  }
+]

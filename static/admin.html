@@ -3,19 +3,77 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>JIMOZI Knowledge Manager</title>
+<title>JIMOZI Admin Console</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@100;200;300;400&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/admin.css">
+<link rel="stylesheet" href="/static/admin.css?v=admin-tabs-1">
 </head>
 <body>
 
-<header>
-  <h1>Knowledge Manager</h1>
-  <div class="brand">JIMOZI Customer Support</div>
-  <p class="lead">Upload business documents. The text is extracted and indexed automatically, so no FAQ JSON is needed.</p>
+<header class="app-header">
+  <div>
+    <div class="brand">JIMOZI · ADMIN CONSOLE</div>
+    <h1>Operations dashboard</h1>
+    <p class="lead">Monitor customer support performance and manage the knowledge powering Jimozi.</p>
+  </div>
+  <div class="header-mark"><img src="/static/logo.png" height="50" width="50"></div>
 </header>
+
+<nav class="tab-nav" role="tablist" aria-label="Admin sections">
+  <button class="tab-button active" id="analyticsTabButton" type="button" role="tab" aria-selected="true" aria-controls="analyticsTab" data-tab="analyticsTab">
+    <span class="tab-icon" aria-hidden="true">↗</span> Analytics
+  </button>
+  <button class="tab-button" id="knowledgeTabButton" type="button" role="tab" aria-selected="false" aria-controls="knowledgeTab" data-tab="knowledgeTab" tabindex="-1">
+    <span class="tab-icon" aria-hidden="true">▤</span> Knowledge manager
+  </button>
+</nav>
+
+<section class="panel analytics-panel tab-panel" id="analyticsTab" role="tabpanel" aria-labelledby="analyticsTabButton">
+  <div class="head">
+    <div>
+      <h2>Query analytics</h2>
+      <div class="muted small">Live operational view of customer questions, retrieval failures and response performance.</div>
+    </div>
+    <div class="analytics-controls">
+      <select id="analyticsDays" aria-label="Analytics period">
+        <option value="1">Last 24 hours</option>
+        <option value="7" selected>Last 7 days</option>
+        <option value="30">Last 30 days</option>
+        <option value="90">Last 90 days</option>
+      </select>
+      <button type="button" class="ghost" id="refreshAnalytics">Refresh analytics</button>
+    </div>
+  </div>
+  <div id="analyticsStatus" class="status muted">Loading analytics…</div>
+  <div id="analyticsContent" hidden>
+    <div class="kpi-grid">
+      <article class="kpi"><span>Total queries</span><strong id="kpiTotal">0</strong><small id="kpiPeriod">Selected period</small></article>
+      <article class="kpi"><span>Failed queries</span><strong id="kpiFailed">0</strong><small id="kpiFailureRate">0% failure rate</small></article>
+      <article class="kpi"><span>Successful queries</span><strong id="kpiSuccess">0</strong><small id="kpiSuccessRate">0% success rate</small></article>
+      <article class="kpi"><span>Average latency</span><strong id="kpiLatency">0 ms</strong><small>Chat retrieval + answer processing</small></article>
+    </div>
+    <div class="chart-grid">
+      <article class="chart-card"><h3>Queries over time</h3><div id="dailyChart" class="chart"></div><div class="legend"><span><i class="dot total"></i>Total</span><span><i class="dot failed"></i>Failed</span></div></article>
+      <article class="chart-card"><h3>Failure reasons</h3><div id="failureChart" class="chart"></div></article>
+      <article class="chart-card"><h3>Most frequently failing questions</h3><div id="topQueries" class="table-wrap"></div></article>
+      <article class="chart-card"><h3>Consumer vs Chef</h3><div id="modeChart" class="chart"></div></article>
+      <article class="chart-card"><h3>Query volume by hour (UTC)</h3><div id="hourChart" class="chart"></div></article>
+      <article class="chart-card"><h3>Product breakdown</h3><div id="productChart" class="chart"></div></article>
+    </div>
+    <article class="chart-card recent-card"><div class="head"><h3>Recent query log</h3><span class="muted small">Latest 100 events · admin only</span></div><div id="recentQueries" class="table-wrap"></div></article>
+  </div>
+</section>
+
+
+<div class="tab-panel" id="knowledgeTab" role="tabpanel" aria-labelledby="knowledgeTabButton" hidden>
+  <div class="section-intro">
+    <div>
+      <h2>Knowledge manager</h2>
+      <p class="muted small">Upload, index and maintain the documents used by Jimozi's retrieval system.</p>
+    </div>
+    <span class="section-tag">KNOWLEDGE BASE</span>
+  </div>
 
 <section class="panel">
   <h2>Upload a document</h2>
@@ -23,7 +81,7 @@
     <div class="grid">
       <div class="field">
         <label for="product">Product ID</label>
-        <input id="product" value="jimozi" required pattern="[A-Za-z0-9_-]+">
+        <input id="product" value="jimozi" required pattern="[A-Za-z0-9_\-]+">
       </div>
       <div class="field">
         <label for="audience">Knowledge audience</label>
@@ -31,6 +89,7 @@
           <option value="both">Both Chef and Consumer</option>
           <option value="consumer">Consumer only</option>
           <option value="chef">Chef only</option>
+          <option value="internal">Internal (stored, never used in answers)</option>
         </select>
       </div>
     </div>
@@ -53,7 +112,8 @@
   </div>
   <div id="documents" class="status muted" aria-live="polite">Loading…</div>
 </section>
+</div>
 
-<script src="/static/admin.js" defer></script>
+<script src="/static/admin.js?v=admin-tabs-1" defer></script>
 </body>
 </html>

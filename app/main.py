@@ -20,28 +20,58 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from .config import ProductStore, ROOT, settings
 from .documents import knowledge_base, _hindi_ratio, _polish_answer
+from .prompt_store import ENRICH_PROMPTS, REQUIRED_PROMPTS, prompts
 from .services import TTSService
 from .sessions import SessionStore
 from .stt import transcribe_wav, warmup as warmup_stt
+from .analytics import init_analytics, record_query, get_analytics
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("voice_receptionist")
 # Print every question and answer in the console. Set CONSOLE_PRINT_CHAT=false in .env to turn this off
 # (conversations can contain personal data, so disable it in production).
 PRINT_CHAT = os.getenv("CONSOLE_PRINT_CHAT", "true").lower() == "true"
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _spawn(coro) -> None:
+    """Run a coroutine in the background and keep a reference so it is not garbage-collected."""
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
+async def _warm_and_enrich() -> None:
+    try:
+        await asyncio.to_thread(knowledge_base.reindex_if_needed)
+        count = await asyncio.to_thread(knowledge_base.warm_index)
+        log.info("KNOWLEDGE_INDEX_WARM chunks=%d", count)
+        await knowledge_base.enrich_pending()
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        log.exception("Knowledge index warm-up / enrichment failed; answers still work from the local index")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    init_analytics()
+    if settings.enable_llm_answers and settings.enable_llm_generation:
+        # Fail fast with a clear message instead of a 500 on the first chat.
+        prompts.validate(REQUIRED_PROMPTS + (ENRICH_PROMPTS if settings.enable_ingest_enrichment else ()))
     stt_task = asyncio.create_task(warmup_stt())
     tts_task = asyncio.create_task(tts.warmup()) if settings.supertonic_enabled else None
+    # Build the in-memory search index once, then give any not-yet-indexed passage its one-time GPT search phrases.
+    index_task = asyncio.create_task(_warm_and_enrich())
     try:
         yield
     finally:
-        for task in (stt_task, tts_task):
+        for task in (stt_task, tts_task, index_task, *_background_tasks):
             if task and not task.done():
                 task.cancel()
         await sessions.close()
 
-app = FastAPI(title="Document-Driven JIMOZI Voice Receptionist", version="3.1.0", lifespan=lifespan)
+app = FastAPI(title="Document-Driven Voice Receptionist", version="3.1.0", lifespan=lifespan)
 
 # CSP: CSS/JS are served as external files from /static, so inline code stays blocked.
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; "
@@ -133,6 +163,14 @@ async def health():
     # Liveness endpoint deliberately excludes secrets, product inventory, and config details.
     return {"status": "ok", "version": app.version, "timestamp": datetime.now(timezone.utc).isoformat()}
 
+@app.get("/api/admin/analytics")
+async def admin_analytics(days: int = 7, product_id: str | None = None, _admin: str = Depends(require_admin)):
+    """Operational query analytics. Query text is visible only to authenticated admins."""
+    if product_id and not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", product_id):
+        raise HTTPException(status_code=400, detail="Invalid product_id")
+    return get_analytics(days=days, product_id=product_id)
+
+
 @app.get("/api/products")
 async def products(_admin: str = Depends(require_admin)):
     result = []
@@ -179,12 +217,30 @@ async def upload_document(product_id: str, file: UploadFile = File(...), audienc
     try:
         result = await knowledge_base.ingest(product_id, file.filename or "upload.txt", data, audience)
         log.info("DOCUMENT_INGESTED %s", json.dumps({"product_id": product_id, **result}, ensure_ascii=False))
+        _spawn(knowledge_base.enrich_pending())  # one-time GPT indexing of the new passages, off the request path
         return {"ok": True, "product_id": product_id, "document": result}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         log.exception("Document upload failed")
         raise HTTPException(status_code=500, detail="Document processing failed. Check server logs for details.") from exc
+
+class AudienceUpdate(BaseModel):
+    audience: Literal["consumer", "chef", "both", "internal"]
+
+
+@app.patch("/api/products/{product_id}/documents/{document_id}")
+async def update_document_audience(product_id: str, document_id: str, body: AudienceUpdate, _admin: str = Depends(require_admin)):
+    try:
+        updated = knowledge_base.set_audience(product_id, document_id, body.audience)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if not updated:
+        raise HTTPException(status_code=404, detail="Document not found")
+    log.info("DOCUMENT_AUDIENCE_CHANGED %s", json.dumps({"product_id": product_id, "document_id": document_id, "audience": body.audience}))
+    _spawn(knowledge_base.enrich_pending())
+    return {"updated": True, "document_id": document_id, "audience": body.audience}
+
 
 @app.delete("/api/products/{product_id}/documents/{document_id}")
 async def delete_document(product_id: str, document_id: str, _admin: str = Depends(require_admin)):
@@ -244,19 +300,41 @@ async def chat(req: ChatRequest, request: Request):
                  "query_chars": len(text)}, ensure_ascii=False))
     business = snap["config"].get("business", {})
     policies = dict(snap["config"].get("policies", {}))
-    if mode == "chef":
-        policies["fallback"] = str((policies.get("mode_fallbacks") or {}).get(
-            "chef", "माफ़ कीजिए, Chef से जुड़ी इस जानकारी की पुष्टि अभी उपलब्ध नहीं है। कृपया अपनी टीम से पुष्टि करें।"
-        ))
+    # Fallback text comes from the product config (per-mode first, then the general one);
+    # if neither exists the answer pipeline uses prompts/fallback_default.txt.
+    mode_fallback = (policies.get("mode_fallbacks") or {}).get(mode)
+    if mode_fallback:
+        policies["fallback"] = str(mode_fallback)
     # Knowledge is extracted from uploaded documents and filtered by the selected audience.
     history_key = f"{mode}:{session_id}"
     history = await sessions.get(history_key)
     answer_started = time.perf_counter()
-    result = await knowledge_base.answer(product_id, text, mode, business, history, policies=policies)
-    answer_ms = round((time.perf_counter() - answer_started) * 1000, 1)
-    answer = _polish_answer(str(result.get("answer") or ""))
-    result["answer"] = answer
-    await sessions.append(history_key, text, answer)
+    try:
+        result = await knowledge_base.answer(product_id, text, mode, business, history, policies=policies)
+        answer_ms = round((time.perf_counter() - answer_started) * 1000, 1)
+        answer = _polish_answer(str(result.get("answer") or ""))
+        result["answer"] = answer
+        await sessions.append(history_key, text, answer)
+        answer_mode = str(result.get("answer_mode") or "unknown")
+        matched = bool(result.get("matched", True))
+        failure_reason = None if matched else answer_mode
+        record_query(
+            product_id=product_id, mode=mode, query_text=text, success=matched,
+            failure_reason=failure_reason, answer_mode=answer_mode,
+            match_score=result.get("match_score"),
+            source_count=len(result.get("sources", [])), latency_ms=answer_ms,
+            session_hash=__import__("hashlib").sha256(session_id.encode()).hexdigest()[:12],
+        )
+    except Exception as exc:
+        answer_ms = round((time.perf_counter() - answer_started) * 1000, 1)
+        record_query(
+            product_id=product_id, mode=mode, query_text=text, success=False,
+            failure_reason=f"exception:{type(exc).__name__}", answer_mode="server_error",
+            latency_ms=answer_ms,
+            session_hash=__import__("hashlib").sha256(session_id.encode()).hexdigest()[:12],
+        )
+        log.exception("Chat query processing failed")
+        raise
     if PRINT_CHAT:
         src = ", ".join(f"{x.get('filename') or x.get('source')}" + (f" p{x['page']}" if x.get("page") else "") for x in result.get("sources", [])[:3]) or "-"
         print(f"\n{'=' * 70}\n[{mode.upper()}] QUESTION : {text}\n[{mode.upper()}] ANSWER   : {answer}\n"
@@ -331,7 +409,9 @@ async def public_config():
             "supertonic_language": settings.supertonic_language,
             "greeting": business.get("greeting", "नमस्ते! मैं आपकी ग्राहक सहायता रिसेप्शनिस्ट हूँ। बताइए, मैं आपकी क्या मदद कर सकती हूँ?"),
             "llm_enabled": settings.enable_llm_answers and bool(settings.openai_api_key),
-            "full_context": settings.enable_full_context and settings.enable_llm_answers and bool(settings.openai_api_key),
+            "full_context": False,
+            "knowledge_index": "persistent_sqlite_fts5",
+            "query_token_budget": 1500,
             "supported_modes": ["consumer", "chef"],
             "strict_faq_only": False,
             "knowledge_mode": "uploaded_documents",

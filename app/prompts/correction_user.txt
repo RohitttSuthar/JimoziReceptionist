@@ -1,0 +1,4 @@
+OFFENDING TOKENS: {violations}
+
+REPLY TO CORRECT:
+{answer}

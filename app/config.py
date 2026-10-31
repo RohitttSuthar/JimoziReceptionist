@@ -24,6 +24,9 @@ class Settings:
     products_dir = Path(os.getenv("PRODUCTS_DIR", str(ROOT / "products")))
     if not products_dir.is_absolute():
         products_dir = ROOT / products_dir
+    prompts_dir = Path(os.getenv("PROMPTS_DIR", str(ROOT / "app" / "prompts")))
+    if not prompts_dir.is_absolute():
+        prompts_dir = ROOT / prompts_dir
     host = os.getenv("HOST", "127.0.0.1")
     port = int(os.getenv("PORT", "8000"))
     openai_api_key = os.getenv("OPENAI_API_KEY", "")
@@ -35,14 +38,12 @@ class Settings:
     log_transcripts = os.getenv("LOG_TRANSCRIPTS", "false").lower() == "true"
     openai_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     openai_base_url = os.getenv("OPENAI_BASE_URL", "").strip() or None  # any OpenAI-compatible provider (Groq, Ollama, ...)
-    openai_embedding_model = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small").strip()
+    openai_embedding_model = os.getenv("OPENAI_EMBEDDING_MODEL", "").strip()
     enable_grounded_llm_rewrite = os.getenv("ENABLE_GROUNDED_LLM_REWRITE", "false").lower() == "true"  # legacy setting
     enable_llm_answers = os.getenv("ENABLE_LLM_ANSWERS", "true").lower() == "true"
-    enable_query_understanding = os.getenv("ENABLE_QUERY_UNDERSTANDING", "true").lower() == "true"  # LLM works out the user's intent
-    openai_understanding_model = os.getenv("OPENAI_UNDERSTANDING_MODEL", "").strip() or openai_model
     enable_llm_generation = os.getenv("ENABLE_LLM_GENERATION", "true").lower() == "true"  # GPT writes the final customer-facing answer by default
     openai_timeout_seconds = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "5.0"))
-    openai_max_tokens = int(os.getenv("OPENAI_MAX_TOKENS", "180"))
+    openai_max_tokens = int(os.getenv("OPENAI_MAX_TOKENS", "150"))
     llm_max_faqs_context = int(os.getenv("LLM_MAX_FAQS_CONTEXT", "60"))
     llm_min_faqs_context = int(os.getenv("LLM_MIN_FAQS_CONTEXT", "12"))
     llm_min_confidence = float(os.getenv("LLM_MIN_CONFIDENCE", "0.65"))
@@ -51,15 +52,36 @@ class Settings:
     semantic_model = os.getenv("SEMANTIC_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
     semantic_top_k = int(os.getenv("SEMANTIC_TOP_K", "24"))
     semantic_min_score = float(os.getenv("SEMANTIC_MIN_SCORE", "0.30"))
-    max_answer_chars = int(os.getenv("MAX_ANSWER_CHARS", "650"))
+    max_answer_chars = int(os.getenv("MAX_ANSWER_CHARS", "350"))
+    answer_language = os.getenv("ANSWER_LANGUAGE", "hi")
+    # When true, answers containing Latin letters or ASCII digits trigger one correction retry
+    # and are rejected if still invalid (needed for Hindi/Devanagari-only TTS). Set false for other languages.
+    enforce_devanagari_output = os.getenv("ENFORCE_DEVANAGARI_OUTPUT", "true").lower() == "true"
+    # Hard budget for one customer request. Prompt/context is kept below this input cap;
+    # answer generation is separately capped so total usage normally remains <= 1,500 tokens.
+    max_query_input_tokens = int(os.getenv("MAX_QUERY_INPUT_TOKENS", "850"))
+    retrieval_context_tokens = int(os.getenv("RETRIEVAL_CONTEXT_TOKENS", "400"))
+    max_query_output_tokens = int(os.getenv("MAX_QUERY_OUTPUT_TOKENS", "150"))
+    max_query_total_tokens = int(os.getenv("MAX_QUERY_TOTAL_TOKENS", "1000"))
 
-    # --- Full-context mode: GPT reads ALL uploaded documents on every question, works out the intent,
-    # and answers in English or Hindi. Falls back to the older retrieval pipeline if anything fails.
-    enable_full_context = os.getenv("ENABLE_FULL_CONTEXT", "true").lower() == "true"
-    openai_full_context_model = os.getenv("OPENAI_FULL_CONTEXT_MODEL", "").strip() or openai_model
-    full_context_max_tokens = int(os.getenv("FULL_CONTEXT_MAX_TOKENS", "90000"))   # estimated corpus budget; above it -> retrieval pipeline
-    full_context_timeout_seconds = float(os.getenv("FULL_CONTEXT_TIMEOUT_SECONDS", "15"))
-    full_context_max_output_tokens = int(os.getenv("FULL_CONTEXT_MAX_OUTPUT_TOKENS", "450"))  # Hindi needs far more tokens than English
+    # Retrieval / answer quality knobs (all overridable from .env).
+    retrieval_top_k = int(os.getenv("RETRIEVAL_TOP_K", "4"))
+    retrieval_candidates = int(os.getenv("RETRIEVAL_CANDIDATES", "160"))
+    history_context_items = int(os.getenv("HISTORY_CONTEXT_ITEMS", "2"))
+    history_item_chars = int(os.getenv("HISTORY_ITEM_CHARS", "120"))
+    answer_temperature = float(os.getenv("ANSWER_TEMPERATURE", "0.2"))
+    script_correction_attempts = int(os.getenv("SCRIPT_CORRECTION_ATTEMPTS", "2"))
+    # In-memory cache of finished answers: repeated questions return instantly, with no GPT call.
+    answer_cache_size = int(os.getenv("ANSWER_CACHE_SIZE", "256"))
+    answer_cache_ttl_seconds = int(os.getenv("ANSWER_CACHE_TTL_SECONDS", "3600"))
+    # One-time GPT indexing: each uploaded passage gets search phrases (Hindi/Hinglish/English)
+    # stored in the local index. Customer queries never trigger this work again.
+    enable_ingest_enrichment = os.getenv("ENABLE_INGEST_ENRICHMENT", "false").lower() == "true"
+    enrich_batch_size = int(os.getenv("ENRICH_BATCH_SIZE", "8"))
+    enrich_concurrency = int(os.getenv("ENRICH_CONCURRENCY", "3"))
+    enrich_timeout_seconds = float(os.getenv("ENRICH_TIMEOUT_SECONDS", "60"))
+
+    # Session and speech settings.
     redis_url = os.getenv("REDIS_URL", "")
     session_ttl_seconds = int(os.getenv("SESSION_TTL_SECONDS", "7200"))
     max_local_sessions = int(os.getenv("MAX_LOCAL_SESSIONS", "1000"))

@@ -1,0 +1,1 @@
+Rewrite this Hindi reply with zero Latin letters and zero digits: write each listed token as it sounds in Devanagari, and numbers as Hindi words. Change nothing else. Output only the reply.

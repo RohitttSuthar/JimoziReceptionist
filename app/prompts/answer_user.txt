@@ -1,0 +1,8 @@
+CONVERSATION HISTORY:
+{history}
+
+RELEVANT KNOWLEDGE:
+{context}
+
+CUSTOMER QUESTION:
+{question}

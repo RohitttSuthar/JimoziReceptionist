@@ -12,3 +12,8 @@ data/knowledge.sqlite3-wal
 data/documents/
 *.log
 .DS_Store
+
+# Runtime SQLite databases
+data/*.sqlite3
+data/*.sqlite3-shm
+data/*.sqlite3-wal
